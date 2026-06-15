@@ -1,43 +1,44 @@
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
+  "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400",
 };
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // CORS preflight requests handle karne ke liye
     if (request.method === "OPTIONS") {
       return new Response(null, { headers: corsHeaders });
     }
 
     // ==========================================
-    // ENDPOINT: GENERATE PAYMENT LINK
+    // ENDPOINT: CREATE ORDER FOR CHECKOUT
     // ==========================================
-    if (url.pathname === "/generate-link" && request.method === "POST") {
+    if (url.pathname === "/create-order" && request.method === "POST") {
       try {
         const body = await request.json();
         const { customerId, customerName, customerPhone, amount } = body;
 
-        // Cashfree Payment Link Payload
+        // Cashfree Order Payload
         const cfPayload = {
+          order_amount: parseFloat(amount),
+          order_currency: "INR",
+          order_id: `ORDER_${customerId}_${Date.now()}`,
           customer_details: {
-            customer_phone: customerPhone,
+            customer_id: customerId,
             customer_name: customerName,
-            customer_email: "noreply@luckytelecom.in" // Optional
+            customer_phone: customerPhone,
+            customer_email: "support@luckytelecom.in" 
           },
-          link_notify: { send_sms: true }, // SMS automatic jayega
-          link_id: `DUES_${customerId}_${Date.now()}`,
-          link_amount: parseFloat(amount),
-          link_currency: "INR",
-          link_purpose: "Pending Dues Clearance",
+          order_meta: {
+            // Payment hone ke baad kahan wapas aana hai (Aap apni site ka URL daal sakte hain)
+            return_url: "https://your-frontend-url.pages.dev/?order_id={order_id}"
+          }
         };
 
-        // ⚠️ LIVE PRODUCTION URL ⚠️
-        const response = await fetch("https://api.cashfree.com/pg/links", {
+        // ⚠️ LIVE PRODUCTION ORDERS API URL ⚠️
+        const response = await fetch("https://api.cashfree.com/pg/orders", {
           method: "POST",
           headers: {
             "accept": "application/json",
@@ -51,18 +52,15 @@ export default {
 
         const data = await response.json();
 
-        // Agar Cashfree se error aata hai toh exact reason wapas bhejega
         if (!response.ok) {
-           return new Response(JSON.stringify({ error: data.message || "Cashfree API Error", details: data }), { 
-              status: response.status, 
-              headers: { ...corsHeaders, "Content-Type": "application/json" } 
+           return new Response(JSON.stringify({ error: data.message || "Order creation failed", details: data }), { 
+              status: response.status, headers: { ...corsHeaders, "Content-Type": "application/json" } 
           });
         }
 
-        // Success response
-        return new Response(JSON.stringify(data), { 
-            status: 200, 
-            headers: { ...corsHeaders, "Content-Type": "application/json" } 
+        // Success: Sending Payment Session ID to frontend
+        return new Response(JSON.stringify({ payment_session_id: data.payment_session_id, order_id: data.order_id }), { 
+            status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } 
         });
 
       } catch (error) {
