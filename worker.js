@@ -1,6 +1,7 @@
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*", // Production mein isko apne frontend URL se replace karein
+  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
   "Access-Control-Max-Age": "86400",
 };
 
@@ -8,13 +9,13 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // Handle CORS for frontend requests
+    // CORS preflight requests handle karne ke liye
     if (request.method === "OPTIONS") {
       return new Response(null, { headers: corsHeaders });
     }
 
     // ==========================================
-    // ENDPOINT 1: GENERATE PAYMENT LINK
+    // ENDPOINT: GENERATE PAYMENT LINK
     // ==========================================
     if (url.pathname === "/generate-link" && request.method === "POST") {
       try {
@@ -28,14 +29,15 @@ export default {
             customer_name: customerName,
             customer_email: "noreply@luckytelecom.in" // Optional
           },
-          link_notify: { send_sms: true }, // Cashfree khud SMS bhejega
-          link_id: `DUES_${customerId}_${Date.now()}`, // Link ID mein hi Customer ID daal di
+          link_notify: { send_sms: true }, // SMS automatic jayega
+          link_id: `DUES_${customerId}_${Date.now()}`,
           link_amount: parseFloat(amount),
           link_currency: "INR",
           link_purpose: "Pending Dues Clearance",
         };
 
-        const response = await fetch("https://sandbox.cashfree.com/pg/links", { // Production mein URL change karein
+        // ⚠️ LIVE PRODUCTION URL ⚠️
+        const response = await fetch("https://api.cashfree.com/pg/links", {
           method: "POST",
           headers: {
             "accept": "application/json",
@@ -48,6 +50,16 @@ export default {
         });
 
         const data = await response.json();
+
+        // Agar Cashfree se error aata hai toh exact reason wapas bhejega
+        if (!response.ok) {
+           return new Response(JSON.stringify({ error: data.message || "Cashfree API Error", details: data }), { 
+              status: response.status, 
+              headers: { ...corsHeaders, "Content-Type": "application/json" } 
+          });
+        }
+
+        // Success response
         return new Response(JSON.stringify(data), { 
             status: 200, 
             headers: { ...corsHeaders, "Content-Type": "application/json" } 
@@ -58,38 +70,6 @@ export default {
       }
     }
 
-    // ==========================================
-    // ENDPOINT 2: CASHFREE WEBHOOK (Mark Dues Zero)
-    // ==========================================
-    if (url.pathname === "/webhook" && request.method === "POST") {
-      try {
-        // 1. Signature Verify Karna (Security Rule)
-        const signature = request.headers.get("x-webhook-signature");
-        const timestamp = request.headers.get("x-webhook-timestamp");
-        const rawBody = await request.text();
-
-        // Note: Production mein crypto module use karke signature verify karna zaroori hai
-        // Taki confirm ho sake ki webhook sirf Cashfree se aaya hai.
-        
-        const payload = JSON.parse(rawBody);
-
-        if (payload.type === "PAYMENT_SUCCESS_WEBHOOK") {
-            const linkId = payload.data.link_id;
-            // Extract Customer ID from link_id (e.g., DUES_CUST123_1689999)
-            const customerId = linkId.split('_')[1]; 
-            
-            // YAHAN DATABASE UPDATE LOGIC AAYEGA
-            // updateDatabaseToZero(customerId);
-            
-            console.log(`Customer ${customerId} ka payment successful. Dues 0 kar diye gaye hain.`);
-        }
-
-        return new Response("Webhook received", { status: 200 });
-      } catch (error) {
-        return new Response("Webhook error", { status: 500 });
-      }
-    }
-
-    return new Response("Not Found", { status: 404 });
+    return new Response("Not Found", { status: 404, headers: corsHeaders });
   }
 };
